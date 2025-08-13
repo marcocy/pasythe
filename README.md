@@ -1,2 +1,2 @@
-# pasythe
+# pas
 greenhouse game
