@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Nicolas’ Greenhouse Dash</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #e8f5e9; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  #wrap { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; }
+  header { padding: 8px 12px; display: flex; gap: 10px; align-items: center; justify-content: space-between; background: #1b5e20; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  header .title { font-weight: 700; letter-spacing: .3px; }
+  header .controls { display: flex; gap: 8px; align-items: center; }
+  button { appearance: none; border: 0; background: #43a047; color: white; padding: 10px 14px; border-radius: 12px; font-weight: 700; box-shadow: 0 6px 14px rgba(0,0,0,.15); cursor: pointer; }
+  button.secondary { background: #2e7d32; }
+  button:active { transform: translateY(1px); }
+  #game { width: 100%; height: 100%; display: grid; place-items: center; }
+  canvas { width: 100%; height: 100%; touch-action: none; background: linear-gradient(#dff5ff, #f4fff4); }
+  footer { padding: 8px 12px; color: #1b5e20; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .pill { background: #c8e6c9; border-radius: 999px; padding: 6px 10px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <div class="title">🥒 Nicolas’ Greenhouse Dash</div>
+    <div class="controls">
+      <button id="startBtn">Start</button>
+      <button id="restartBtn" class="secondary">Restart</button>
+    </div>
+  </header>
+  <div id="game">
+    <canvas id="canvas"></canvas>
+  </div>
+  <footer>
+    <div class="pill">Drag Nicolas to catch veggies. Miss 5 and it’s game over. 60s sprint.</div>
+    <div id="hud"></div>
+  </footer>
+</div>
+<script>
+// --- Face image (auto from Google Drive, with fallback) ---
+const DRIVE_ID = '1lEKOLDqUS3vsr9N2C2VybH_NdUkYZU6a';
+const FACE_SRC = `https://drive.google.com/uc?export=view&id=${DRIVE_ID}`; // loads directly from Drive share link
+const DEFAULT_FACE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAK8AAADzCAYAAADw3kb5AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAQBdEVYdENyZWF0aW9uIFRpbWUAMDkvMTMvMjTHLnO6AAABTUlEQVR4nO3BAQ0AAADCoPdPbQhPoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4BYwEwABHmqHcAAAAASUVORK5CYII=";
+
+// --- Config ---
+const EMOJIS = ["🥒","🍅","🥕","🍆"];
+const DROP_INTERVAL_BASE = 900;
+const GAME_TIME = 60;
+const MAX_MISSES = 5;
+
+const state = { running: false, score: 0, misses: 0, timeLeft: GAME_TIME, lastDrop: 0, dropInterval: DROP_INTERVAL_BASE, veggies: [], w: 0, h: 0 };
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('hud');
+
+const faceImg = new Image();
+faceImg.crossOrigin = 'anonymous';
+function setFace(src){
+  // cache-bust remote loads to avoid stale images
+  const bust = src.startsWith('http') ? (src.includes('?') ? `&cb=${Date.now()}` : `?cb=${Date.now()}`) : '';
+  faceImg.src = src + bust;
+}
+setFace(FACE_SRC);
+faceImg.onerror = () => { console.warn('Remote face failed, using embedded fallback'); setFace(DEFAULT_FACE); };
+const nicolas = { x: 0, y: 0, r: 60, ready: false };
+faceImg.onload = () => { nicolas.ready = true; };
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  state.w = canvas.clientWidth;
+  state.h = canvas.clientHeight;
+  nicolas.r = Math.max(48, Math.min(state.w, state.h) * 0.08);
+  nicolas.x = state.w/2; nicolas.y = state.h - nicolas.r - 16;
+}
+window.addEventListener('resize', resize);
+resize();
+
+let dragging = false;
+function withinNicolas(x,y){ return Math.hypot(x - nicolas.x, y - nicolas.y) <= nicolas.r; }
+function pointerDown(x, y){ dragging = withinNicolas(x,y); if (dragging){ nicolas.x=x; nicolas.y=y; } }
+function pointerMove(x, y){ if (dragging){ nicolas.x = Math.max(nicolas.r, Math.min(state.w - nicolas.r, x)); nicolas.y = Math.max(nicolas.r, Math.min(state.h - nicolas.r, y)); } }
+function pointerUp(){ dragging = false; }
+
+canvas.addEventListener('mousedown', e=>pointerDown(e.offsetX, e.offsetY));
+canvas.addEventListener('mousemove', e=>pointerMove(e.offsetX, e.offsetY));
+canvas.addEventListener('mouseup', pointerUp);
+canvas.addEventListener('mouseleave', pointerUp);
+canvas.addEventListener('touchstart', e=>{ const t = e.changedTouches[0], r = canvas.getBoundingClientRect(); pointerDown(t.clientX - r.left, t.clientY - r.top); e.preventDefault(); }, {passive:false});
+canvas.addEventListener('touchmove', e=>{ const t = e.changedTouches[0], r = canvas.getBoundingClientRect(); pointerMove(t.clientX - r.left, t.clientY - r.top); e.preventDefault(); }, {passive:false});
+canvas.addEventListener('touchend', ()=>pointerUp(), {passive:true});
+
+function start(){ state.running = true; state.score = 0; state.misses = 0; state.timeLeft = GAME_TIME; state.veggies = []; state.dropInterval = DROP_INTERVAL_BASE; state.lastDrop = 0; lastTime = 0; }
+document.getElementById('startBtn').onclick = start;
+document.getElementById('restartBtn').onclick = start;
+
+function dropVeggie(){ const size = 34 + Math.random()*16, speed = 1.5 + Math.random()*1.8, x = Math.random() * (state.w - size*1.2) + size*0.6, emoji = EMOJIS[Math.floor(Math.random()*EMOJIS.length)]; state.veggies.push({x, y: -20, size, speed, emoji}); }
+
+function update(dt){
+  if(!state.running) return;
+  state.timeLeft -= dt/1000;
+  if (state.timeLeft <= 0){ state.running = false; state.timeLeft = 0; }
+  state.lastDrop += dt;
+  if (state.lastDrop > state.dropInterval){ dropVeggie(); state.lastDrop = 0; state.dropInterval = Math.max(350, state.dropInterval - 4); }
+  for (const v of state.veggies){ v.y += v.speed * (dt*0.6); }
+  for (let i=state.veggies.length-1;i>=0;i--){ const v = state.veggies[i]; if (v.y > state.h + 40){ state.veggies.splice(i,1); state.misses++; if (state.misses >= MAX_MISSES) state.running = false; continue; } const dx = v.x - nicolas.x, dy = v.y - nicolas.y; if (Math.hypot(dx,dy) < nicolas.r*0.9){ state.veggies.splice(i,1); state.score += 1; } }
+}
+
+function drawGreenhouse(){ const g = ctx.createLinearGradient(0, 0, 0, state.h); g.addColorStop(0, '#e7f6ff'); g.addColorStop(1, '#f8fff8'); ctx.fillStyle = g; ctx.fillRect(0,0,state.w,state.h); ctx.fillStyle = '#c8e6c9'; ctx.fillRect(0, state.h*0.8, state.w, state.h*0.2); ctx.fillStyle = '#8bc34a'; ctx.fillRect(0, state.h*0.82, state.w, state.h*0.03); ctx.strokeStyle = 'rgba(27,94,32,.85)'; ctx.lineWidth = 6; ctx.strokeRect(8,8,state.w-16,state.h-16); ctx.beginPath(); const cols = 5, colW = (state.w-16)/cols; for(let i=1;i<cols;i++){ ctx.moveTo(8+i*colW,8); ctx.lineTo(8+i*colW,state.h-8);} const rows = 6, rowH = (state.h-16)/rows; for(let j=1;j<rows;j++){ ctx.moveTo(8,8+j*rowH); ctx.lineTo(state.w-8,8+j*rowH);} ctx.stroke(); }
+
+function drawVeggies(){ for (const v of state.veggies){ ctx.font = `${v.size}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(v.emoji, v.x, v.y); } }
+
+function drawNicolas(){ const {x,y,r} = nicolas; ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.clip(); if (nicolas.ready){ const s = r*2; ctx.drawImage(faceImg, x - r, y - r, s, s); } else { ctx.fillStyle = '#90a4ae'; ctx.fillRect(x-r, y-r, r*2, r*2); } ctx.restore(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.strokeStyle = '#1b5e20'; ctx.lineWidth = 4; ctx.stroke(); }
+
+function drawHUD(){ const s = `Score: ${state.score}  •  Misses: ${state.misses}/${MAX_MISSES}  •  Time: ${Math.ceil(state.timeLeft)}s`; hud.textContent = s; if (!state.running){ ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0,0,state.w,state.h); ctx.fillStyle = 'white'; ctx.font = 'bold 28px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const headline = state.timeLeft<=0 ? 'Time! Harvest Report' : (state.misses>=MAX_MISSES ? 'Greenhouse Overload!' : 'Paused'); ctx.fillText(headline, state.w/2, state.h/2 - 40); ctx.font = '20px system-ui, sans-serif'; ctx.fillText(`Veggies collected: ${state.score}`, state.w/2, state.h/2); ctx.fillText('Tap Start or drag Nicolas to begin.', state.w/2, state.h/2 + 36); } }
+
+let lastTime = 0;
+function loop(t){ const dt = Math.min(32, t - lastTime || 16); lastTime = t; update(dt); drawGreenhouse(); drawVeggies(); drawNicolas(); drawHUD(); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+
+canvas.addEventListener('pointerdown', ()=>{ if(!state.running) start(); });
+</script>
+</body>
+</html>
